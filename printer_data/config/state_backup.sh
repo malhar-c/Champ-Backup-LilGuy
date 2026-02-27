@@ -64,6 +64,32 @@ LAST_JOB=$(sqlite3 "$MOON_BACKUP" \
 "SELECT filename FROM job_history ORDER BY end_time DESC LIMIT 1;")
 
 # -------------------------------
+# Extract Last Print Thumbnail
+# -------------------------------
+
+THUMB_PATH=$(sqlite3 "$MOON_BACKUP" \
+"SELECT json_extract(metadata, '$.thumbnails[2].relative_path')
+ FROM job_history
+ ORDER BY end_time DESC
+ LIMIT 1;")
+
+# Remove quotes
+THUMB_PATH=$(echo "$THUMB_PATH" | tr -d '"')
+
+if [[ -n "$THUMB_PATH" ]]; then
+    SOURCE_THUMB="$HOME/printer_data/gcodes/$THUMB_PATH"
+    DEST_THUMB="$STATE_DIR/last_print.png"
+
+    if [[ -f "$SOURCE_THUMB" ]]; then
+        cp "$SOURCE_THUMB" "$DEST_THUMB"
+    else
+        echo "Thumbnail file not found at $SOURCE_THUMB"
+    fi
+else
+    echo "No thumbnail found in metadata."
+fi
+
+# -------------------------------
 # Human-friendly conversions
 # -------------------------------
 
@@ -92,13 +118,52 @@ fi
 TOTAL_SPOOLS=$(sqlite3 "$SPOOL_BACKUP" \
 "SELECT COUNT(*) FROM spool WHERE archived IS NULL OR archived = 0;")
 
-LAST_SPOOL=$(sqlite3 "$SPOOL_BACKUP" \
-"SELECT filament.name
- FROM spool
- JOIN filament ON spool.filament_id = filament.id
- WHERE spool.last_used IS NOT NULL
- ORDER BY spool.last_used DESC
- LIMIT 1;")
+# -------------------------------
+# Extract Spoolman Info (robust)
+# -------------------------------
+
+SPOOL_ROW=$(sqlite3 -separator "|" "$SPOOL_BACKUP" "
+SELECT filament.name,
+       filament.color_hex,
+       filament.material,
+       CAST((spool.initial_weight - spool.used_weight) AS INTEGER)
+FROM spool
+JOIN filament ON spool.filament_id = filament.id
+WHERE spool.last_used IS NOT NULL
+ORDER BY spool.last_used DESC
+LIMIT 1;
+")
+
+IFS="|" read -r SPOOL_NAME SPOOL_COLOR SPOOL_MATERIAL REMAINING <<< "$SPOOL_ROW"
+
+# Fallback if no color
+if [[ -z "$SPOOL_COLOR" ]]; then
+    SPOOL_COLOR="#999999"
+fi
+
+# Generate SVG spool image
+SPOOL_SVG="$STATE_DIR/last_spool.svg"
+
+cat > "$SPOOL_SVG" <<EOF
+<svg width="220" height="220" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer rim -->
+  <circle cx="110" cy="110" r="95" fill="#444" />
+  
+  <!-- Filament body -->
+  <circle cx="110" cy="110" r="80" fill="$SPOOL_COLOR" />
+  
+  <!-- Inner ring -->
+  <circle cx="110" cy="110" r="50" fill="#222" />
+  
+  <!-- Hub -->
+  <circle cx="110" cy="110" r="25" fill="#ddd" stroke="#999" stroke-width="4"/>
+
+  <!-- Remaining text -->
+  <text x="110" y="190" font-size="16" text-anchor="middle" fill="#333" font-family="Arial">
+    ${REMAINING}g
+  </text>
+</svg>
+EOF
 
 # -------------------------------
 # Generate Clean README
@@ -111,6 +176,8 @@ cat > "$README" <<EOF
 
 ## 📊 Moonraker Statistics
 
+![Last Print Thumbnail](./last_print.png)
+
 • **Total Jobs Completed:** $TOTAL_JOBS  
 • **Total Print Time:** ${TP_H}h ${TP_M}m  
 • **Longest Print:** ${LP_H}h ${LP_M}m  
@@ -121,13 +188,21 @@ cat > "$README" <<EOF
 
 ## 🧵 Spoolman Overview
 
-• **Active Spools Registered:** $TOTAL_SPOOLS  
-• **Most Recently Used Spool:** $LAST_SPOOL  
+![Last Used Spool](./last_spool.svg)
+
+• **Name:** $SPOOL_NAME  
+• **Material:** $SPOOL_MATERIAL  
+• **Remaining Weight:** ${REMAINING}g  
+• **Active Spools:** $TOTAL_SPOOLS 
 
 ---
 
-_Generated automatically by state_backup.sh_
+_Generated automatically by state_backup script_
 EOF
+
+echo "Updated Readme and Assets states"
+
+echo "Comitting and Pushing to Github!"
 
 cd "$STATE_DIR"
 
