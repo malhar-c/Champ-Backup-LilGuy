@@ -14,13 +14,13 @@ mkdir -p "$STATE_DIR"
 # -------------------------------
 # Skip if printing
 # -------------------------------
-PRINT_STATE=$(curl -s http://localhost:7125/printer/objects/query?print_stats \
-| grep -o '"state":"[^"]*"' | cut -d':' -f2 | tr -d '"')
+#PRINT_STATE=$(curl -s http://localhost:7125/printer/objects/query?print_stats \
+#| grep -o '"state":"[^"]*"' | cut -d':' -f2 | tr -d '"')
 
-if [[ "$PRINT_STATE" == "printing" ]]; then
-    echo "Print in progress. Skipping backup."
-    exit 0
-fi
+#if [[ "$PRINT_STATE" == "printing" ]]; then
+#    echo "Print in progress. Skipping backup."
+#    exit 0
+#fi
 
 echo "Starting state backup for $DATE..."
 
